@@ -17,6 +17,35 @@ const initialResults: CheckResult[] = [
   { field: "Government Warning", status: "FAIL", value: "Pending" },
 ];
 
+const knownBrands = [
+  "Jack Daniel's", "Jack Daniels", "Maker's Mark", "Aberlour", "ABC",
+  "Budweiser", "Coors Light", "Coors", "Miller Lite", "Miller", "Corona",
+  "Heineken", "Guinness", "Modelo", "Stella Artois",
+  "Ciroc", "Grey Goose", "Tito's", "Titos", "Smirnoff", "Absolut",
+  "Hennessy", "Remy Martin", "Courvoisier",
+  "Patron", "Don Julio", "Jose Cuervo",
+  "Bacardi", "Captain Morgan", "Malibu",
+  "Woodford Reserve", "Buffalo Trace", "Jim Beam", "Wild Turkey",
+  "Barefoot", "Josh Cellars", "Yellow Tail",
+];
+
+const classTypes = [
+  "tennessee whiskey", "tennessee whisky", "straight rye whiskey",
+  "straight rye whisky", "straight bourbon whiskey", "bourbon whiskey",
+  "kentucky straight bourbon whiskey", "single malt scotch whisky",
+  "scotch whisky", "single malt", "bourbon", "rye whiskey", "rye whisky",
+  "whiskey", "whisky", "vodka", "beer", "lager", "ale", "ipa", "stout",
+  "porter", "wine", "red wine", "white wine", "champagne", "prosecco",
+  "rum", "gin", "tequila", "mezcal", "brandy", "cognac", "liqueur",
+];
+
+const ignoredBrandWords = [
+  "government", "warning", "alcohol", "content", "volume", "vol", "alc",
+  "proof", "ml", "liter", "litre", "bottled", "distilled", "brewed",
+  "imported", "produced", "premium", "quality", "reserve", "single",
+  "barrel", "old", "brand", "label", "light", "extra", "smooth",
+];
+
 export default function Home() {
   const [fileName, setFileName] = useState("No file selected");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -36,114 +65,189 @@ export default function Home() {
       .trim();
   }
 
-  function findBrand(text: string) {
-    const knownBrands = [
-      /maker'?s\s*mark/i,
-      /maker'?s/i,
-      /aberlour/i,
-      /\babc\b/i,
-    ];
+  function normalize(text: string) {
+    return cleanText(text).toLowerCase();
+  }
 
-    for (const pattern of knownBrands) {
-      const match = text.match(pattern);
-      if (match) return match[0];
-    }
+  function findKnownBrand(text: string) {
+    const lower = normalize(text);
 
-    const lines = text
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
+    for (const brand of knownBrands) {
+      const brandLower = brand.toLowerCase().replace("'", "");
+      const textLower = lower.replace("'", "");
 
-    const ignoredWords = [
-      "government",
-      "warning",
-      "straight",
-      "single",
-      "barrel",
-      "whisky",
-      "whiskey",
-      "bourbon",
-      "alcohol",
-      "liter",
-      "ml",
-      "alc",
-      "vol",
-    ];
-
-    for (const line of lines) {
-      const cleanLine = line.replace(/[^a-zA-Z0-9' ]/g, "").trim();
-
-      if (
-        cleanLine.length >= 3 &&
-        cleanLine.length <= 40 &&
-        !ignoredWords.some((word) => cleanLine.toLowerCase().includes(word))
-      ) {
-        return cleanLine;
+      if (textLower.includes(brandLower)) {
+        return brand;
       }
     }
 
     return "";
   }
 
-  function checkLabel(text: string): CheckResult[] {
+  function findClassType(text: string) {
+    const lower = normalize(text);
+
+    const sortedTypes = [...classTypes].sort((a, b) => b.length - a.length);
+
+    for (const type of sortedTypes) {
+      if (lower.includes(type)) {
+        return type.toUpperCase();
+      }
+    }
+
+    return "";
+  }
+
+  function findBrandNearType(text: string) {
+    const lines = text
+      .split("\n")
+      .map((line) => line.replace(/[^a-zA-Z0-9' ]/g, " ").trim())
+      .filter(Boolean);
+
+    for (const line of lines) {
+      const lower = line.toLowerCase();
+
+      for (const type of classTypes) {
+        if (lower.includes(type)) {
+          const beforeType = line
+            .replace(new RegExp(type, "i"), "")
+            .trim();
+
+          const words = beforeType
+            .split(" ")
+            .filter((word) => word.length > 1)
+            .filter(
+              (word) =>
+                !ignoredBrandWords.includes(word.toLowerCase()) &&
+                !classTypes.includes(word.toLowerCase())
+            );
+
+          if (words.length > 0) {
+            return words.slice(0, 3).join(" ");
+          }
+        }
+      }
+    }
+
+    return "";
+  }
+
+  function findLikelyBrand(text: string) {
+    const known = findKnownBrand(text);
+    if (known) return known;
+
+    const nearType = findBrandNearType(text);
+    if (nearType) return nearType;
+
+    const lines = text
+      .split("\n")
+      .map((line) => line.replace(/[^a-zA-Z0-9' ]/g, " ").trim())
+      .filter(Boolean);
+
+    for (const line of lines) {
+      const lower = line.toLowerCase();
+
+      if (
+        line.length >= 3 &&
+        line.length <= 35 &&
+        !/\d{2,}/.test(line) &&
+        !ignoredBrandWords.some((word) => lower.includes(word)) &&
+        !classTypes.some((type) => lower.includes(type))
+      ) {
+        return line;
+      }
+    }
+
+    return "";
+  }
+
+  function findAlcoholContent(text: string) {
     const cleaned = cleanText(text);
-    const lower = cleaned.toLowerCase();
 
-    const brandValue = findBrand(text);
+    const patterns = [
+      /\d{1,2}(\.\d+)?\s*%\s*(alc\/vol|alc\.?\/vol\.?|alc|alcohol|abv|by volume|by vol|by weight)?/i,
+      /alcohol\s*content\s*(not\s*more\s*than)?\s*\d{1,2}(\.\d+)?\s*%/i,
+      /\d{1,3}\s*proof/i,
+    ];
 
-    const classMatch = cleaned.match(
-      /straight rye whisky|straight rye whiskey|single malt scotch whisky|single malt|scotch|whiskey|whisky|bourbon|vodka|rum|gin|tequila|wine|beer/i
-    );
+    for (const pattern of patterns) {
+      const match = cleaned.match(pattern);
+      if (match) return match[0];
+    }
 
-    const alcoholMatch =
-      cleaned.match(
-        /\d{1,2}(\.\d+)?\s*%\s*(alc|alcohol|alc\/vol|alc\.\/vol\.|abv|by vol)?/i
-      ) ||
-      cleaned.match(/\d{1,2}(\.\d+)?\s*%\b/i) ||
-      cleaned.match(/\d{1,2}(\.\d+)?\s*(alc|abv)/i);
+    return "";
+  }
 
-    const netMatch =
-      cleaned.match(/\d+(\.\d+)?\s*(ml|mL|ML)\b/i) ||
-      cleaned.match(/\d+(\.\d+)?\s*(liter|litre|LITER)\b/i) ||
-      cleaned.match(/\d+(\.\d+)?\s*l\b/i);
+  function findNetContents(text: string) {
+    const cleaned = cleanText(text);
 
-    const warningMatch =
-      lower.includes("government warning") ||
-      lower.includes("surgeon general") ||
-      lower.includes("pregnancy") ||
-      lower.includes("pregnant") ||
-      lower.includes("birth defects") ||
-      lower.includes("alcoholic beverages") ||
-      lower.includes("operate machinery") ||
-      lower.includes("health problems") ||
-      lower.includes("ability to drive") ||
-      lower.includes("impairs your ability");
+    const patterns = [
+      /\d+(\.\d+)?\s*(ml|mL|ML)\b/i,
+      /\d+(\.\d+)?\s*(liter|litre|LITER)\b/i,
+      /\d+(\.\d+)?\s*l\b/i,
+      /\d+(\.\d+)?\s*(fl\.?\s*oz|fluid ounces|oz)\b/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = cleaned.match(pattern);
+      if (match) return match[0];
+    }
+
+    return "";
+  }
+
+  function findGovernmentWarning(text: string) {
+    const lower = normalize(text);
+
+    const warningKeywords = [
+      "government warning",
+      "surgeon general",
+      "pregnancy",
+      "pregnant",
+      "birth defects",
+      "alcoholic beverages",
+      "operate machinery",
+      "health problems",
+      "ability to drive",
+      "impairs your ability",
+      "do not drink alcoholic beverages",
+    ];
+
+    return warningKeywords.some((keyword) => lower.includes(keyword));
+  }
+
+  function checkLabel(text: string): CheckResult[] {
+    const brand = findLikelyBrand(text);
+    const classType = findClassType(text);
+    const alcohol = findAlcoholContent(text);
+    const netContents = findNetContents(text);
+    const warning = findGovernmentWarning(text);
 
     return [
       {
         field: "Brand Name",
-        status: brandValue ? "PASS" : "FAIL",
-        value: brandValue || "Not found",
+        status: brand ? "PASS" : "FAIL",
+        value: brand || "Not found",
       },
       {
         field: "Class/Type",
-        status: classMatch ? "PASS" : "FAIL",
-        value: classMatch ? classMatch[0] : "Not found",
+        status: classType ? "PASS" : "FAIL",
+        value: classType || "Not found",
       },
       {
         field: "Alcohol Content",
-        status: alcoholMatch ? "PASS" : "FAIL",
-        value: alcoholMatch ? alcoholMatch[0] : "Not found",
+        status: alcohol ? "PASS" : "FAIL",
+        value: alcohol || "Not found",
       },
       {
         field: "Net Contents",
-        status: netMatch ? "PASS" : "FAIL",
-        value: netMatch ? netMatch[0] : "Not found",
+        status: netContents ? "PASS" : "FAIL",
+        value: netContents || "Not found",
       },
       {
         field: "Government Warning",
-        status: warningMatch ? "PASS" : "FAIL",
-        value: warningMatch ? "Government warning detected" : "Not found",
+        status: warning ? "PASS" : "FAIL",
+        value: warning ? "Government warning detected" : "Not found",
       },
     ];
   }
@@ -172,7 +276,6 @@ export default function Home() {
       setResults(initialResults);
 
       const result = await Tesseract.recognize(selectedFile, "eng");
-
       const extractedText = result.data.text;
       const confidence = Math.round(result.data.confidence);
 
@@ -188,9 +291,7 @@ export default function Home() {
       if (confidence < 60) {
         setMessage("Image quality appears low. Results may be inaccurate.");
       } else if (confidence < 80) {
-        setMessage(
-          "OCR completed, but confidence is moderate. Review the extracted text."
-        );
+        setMessage("OCR completed, but confidence is moderate. Review the extracted text.");
       } else {
         setMessage("OCR completed successfully.");
       }
@@ -203,9 +304,7 @@ export default function Home() {
   }
 
   const completedResults = results.filter((item) => item.value !== "Pending");
-  const passedCount = completedResults.filter(
-    (item) => item.status === "PASS"
-  ).length;
+  const passedCount = completedResults.filter((item) => item.status === "PASS").length;
 
   const score =
     completedResults.length === 0
@@ -220,9 +319,15 @@ export default function Home() {
         </h1>
 
         <p className="mt-4 text-slate-600">
-          Upload an alcohol label image. The app uses OCR to extract text and
-          checks for required compliance fields.
+          Upload an alcohol label image. The app uses OCR to extract text and checks
+          for required compliance fields.
         </p>
+
+        <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+          <strong>Best Results:</strong> Upload a clear, straight-on image showing
+          the front and/or back label. OCR accuracy may decrease when images are
+          blurry, angled, reflective, partially obscured, or low resolution.
+        </div>
 
         <div className="mt-8 rounded-lg border border-dashed border-slate-300 p-6">
           <label className="block text-sm font-medium text-slate-700">
@@ -282,45 +387,34 @@ export default function Home() {
           <div className="mt-4 grid gap-2 text-sm">
             <p className="font-bold">Compliance Score: {score}</p>
             <p className="font-bold">
-              OCR Confidence:{" "}
-              {ocrConfidence === null ? "Pending" : `${ocrConfidence}%`}
+              OCR Confidence: {ocrConfidence === null ? "Pending" : `${ocrConfidence}%`}
             </p>
           </div>
 
           {ocrConfidence !== null && ocrConfidence < 80 && (
             <p className="mt-3 rounded bg-yellow-100 p-3 text-sm text-yellow-900">
-              Image quality warning: OCR confidence is below 80%. Please review
-              the extracted text or upload a clearer image.
+              Image quality warning: OCR confidence is below 80%. Please review the
+              extracted text or upload a clearer image.
             </p>
           )}
 
           <table className="mt-6 w-full border border-slate-400">
             <thead>
               <tr className="bg-slate-200">
-                <th className="border border-slate-400 p-2 text-left">
-                  Required Field
-                </th>
-                <th className="border border-slate-400 p-2 text-left">
-                  Status
-                </th>
-                <th className="border border-slate-400 p-2 text-left">
-                  Detected Value
-                </th>
+                <th className="border border-slate-400 p-2 text-left">Required Field</th>
+                <th className="border border-slate-400 p-2 text-left">Status</th>
+                <th className="border border-slate-400 p-2 text-left">Detected Value</th>
               </tr>
             </thead>
 
             <tbody>
               {results.map((result) => (
                 <tr key={result.field}>
-                  <td className="border border-slate-400 p-2">
-                    {result.field}
-                  </td>
+                  <td className="border border-slate-400 p-2">{result.field}</td>
                   <td className="border border-slate-400 p-2 font-bold">
                     {result.value === "Pending" ? "Pending" : result.status}
                   </td>
-                  <td className="border border-slate-400 p-2">
-                    {result.value}
-                  </td>
+                  <td className="border border-slate-400 p-2">{result.value}</td>
                 </tr>
               ))}
             </tbody>
