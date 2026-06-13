@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Tesseract from "tesseract.js";
+import Fuse from "fuse.js";
 
 type CheckResult = {
   field: string;
@@ -18,33 +19,134 @@ const initialResults: CheckResult[] = [
 ];
 
 const knownBrands = [
-  "Jack Daniel's", "Jack Daniels", "Maker's Mark", "Aberlour", "ABC",
-  "Budweiser", "Coors Light", "Coors", "Miller Lite", "Miller", "Corona",
-  "Heineken", "Guinness", "Modelo", "Stella Artois",
-  "Ciroc", "Grey Goose", "Tito's", "Titos", "Smirnoff", "Absolut",
-  "Hennessy", "Remy Martin", "Courvoisier",
-  "Patron", "Don Julio", "Jose Cuervo",
-  "Bacardi", "Captain Morgan", "Malibu",
-  "Woodford Reserve", "Buffalo Trace", "Jim Beam", "Wild Turkey",
-  "Barefoot", "Josh Cellars", "Yellow Tail",
+  "Budweiser",
+  "Bud Light",
+  "Coors Light",
+  "Coors",
+  "Miller Lite",
+  "Miller",
+  "Corona",
+  "Corona Extra",
+  "Heineken",
+  "Guinness",
+  "Modelo",
+  "Modelo Especial",
+  "Stella Artois",
+  "Ciroc",
+  "Grey Goose",
+  "Tito's",
+  "Titos",
+  "Smirnoff",
+  "Absolut",
+  "Ketel One",
+  "Belvedere",
+  "Jack Daniel's",
+  "Jack Daniels",
+  "Maker's Mark",
+  "Maker Mark",
+  "Aberlour",
+  "Woodford Reserve",
+  "Buffalo Trace",
+  "Jim Beam",
+  "Wild Turkey",
+  "Knob Creek",
+  "Bulleit",
+  "Hennessy",
+  "Remy Martin",
+  "Courvoisier",
+  "Patron",
+  "Don Julio",
+  "Jose Cuervo",
+  "Casamigos",
+  "Bacardi",
+  "Captain Morgan",
+  "Malibu",
+  "Bombay Sapphire",
+  "Tanqueray",
+  "Barefoot",
+  "Josh Cellars",
+  "Yellow Tail",
+  "ABC",
 ];
 
 const classTypes = [
-  "tennessee whiskey", "tennessee whisky", "straight rye whiskey",
-  "straight rye whisky", "straight bourbon whiskey", "bourbon whiskey",
-  "kentucky straight bourbon whiskey", "single malt scotch whisky",
-  "scotch whisky", "single malt", "bourbon", "rye whiskey", "rye whisky",
-  "whiskey", "whisky", "vodka", "beer", "lager", "ale", "ipa", "stout",
-  "porter", "wine", "red wine", "white wine", "champagne", "prosecco",
-  "rum", "gin", "tequila", "mezcal", "brandy", "cognac", "liqueur",
+  "tennessee whiskey",
+  "tennessee whisky",
+  "straight rye whiskey",
+  "straight rye whisky",
+  "straight bourbon whiskey",
+  "kentucky straight bourbon whiskey",
+  "bourbon whiskey",
+  "single malt scotch whisky",
+  "scotch whisky",
+  "single malt",
+  "bourbon",
+  "rye whiskey",
+  "rye whisky",
+  "whiskey",
+  "whisky",
+  "vodka",
+  "beer",
+  "lager",
+  "ale",
+  "ipa",
+  "stout",
+  "porter",
+  "wine",
+  "champagne",
+  "prosecco",
+  "rum",
+  "gin",
+  "tequila",
+  "mezcal",
+  "brandy",
+  "cognac",
+  "liqueur",
 ];
 
 const ignoredBrandWords = [
-  "government", "warning", "alcohol", "content", "volume", "vol", "alc",
-  "proof", "ml", "liter", "litre", "bottled", "distilled", "brewed",
-  "imported", "produced", "premium", "quality", "reserve", "single",
-  "barrel", "old", "brand", "label", "light", "extra", "smooth",
+  "government",
+  "warning",
+  "alcohol",
+  "content",
+  "volume",
+  "vol",
+  "alc",
+  "proof",
+  "ml",
+  "liter",
+  "litre",
+  "bottled",
+  "distilled",
+  "brewed",
+  "imported",
+  "produced",
+  "premium",
+  "quality",
+  "reserve",
+  "single",
+  "barrel",
+  "old",
+  "brand",
+  "label",
+  "beer",
+  "lager",
+  "light",
+  "vodka",
+  "whiskey",
+  "whisky",
+  "bourbon",
+  "wine",
+  "rum",
+  "gin",
+  "tequila",
 ];
+
+const brandFuse = new Fuse(knownBrands, {
+  includeScore: true,
+  threshold: 0.15,
+  ignoreLocation: true,
+});
 
 export default function Home() {
   const [fileName, setFileName] = useState("No file selected");
@@ -70,14 +172,34 @@ export default function Home() {
   }
 
   function findKnownBrand(text: string) {
-    const lower = normalize(text);
+    const cleaned = cleanText(text);
+    const lower = cleaned.toLowerCase().replace(/'/g, "");
+    const sortedBrands = [...knownBrands].sort((a, b) => b.length - a.length);
 
-    for (const brand of knownBrands) {
-      const brandLower = brand.toLowerCase().replace("'", "");
-      const textLower = lower.replace("'", "");
+    // 1. Exact brand match first.
+    for (const brand of sortedBrands) {
+      const brandLower = brand.toLowerCase().replace(/'/g, "");
 
-      if (textLower.includes(brandLower)) {
+      if (lower.includes(brandLower)) {
         return brand;
+      }
+    }
+
+    // 2. Strict fuzzy match only on full OCR lines.
+    const lines = text
+      .split("\n")
+      .map((line) => line.replace(/[^a-zA-Z0-9' ]/g, " ").trim())
+      .filter((line) => line.length >= 3 && line.length <= 40);
+
+    for (const line of lines) {
+      const result = brandFuse.search(line);
+
+      if (
+        result.length > 0 &&
+        result[0].score !== undefined &&
+        result[0].score < 0.12
+      ) {
+        return result[0].item;
       }
     }
 
@@ -86,7 +208,6 @@ export default function Home() {
 
   function findClassType(text: string) {
     const lower = normalize(text);
-
     const sortedTypes = [...classTypes].sort((a, b) => b.length - a.length);
 
     for (const type of sortedTypes) {
@@ -94,6 +215,10 @@ export default function Home() {
         return type.toUpperCase();
       }
     }
+
+    if (lower.includes("king of beers")) return "BEER";
+    if (lower.includes("lager beer")) return "LAGER BEER";
+    if (lower.includes("light beer")) return "LIGHT BEER";
 
     return "";
   }
@@ -109,9 +234,7 @@ export default function Home() {
 
       for (const type of classTypes) {
         if (lower.includes(type)) {
-          const beforeType = line
-            .replace(new RegExp(type, "i"), "")
-            .trim();
+          const beforeType = line.replace(new RegExp(type, "i"), "").trim();
 
           const words = beforeType
             .split(" ")
@@ -119,7 +242,8 @@ export default function Home() {
             .filter(
               (word) =>
                 !ignoredBrandWords.includes(word.toLowerCase()) &&
-                !classTypes.includes(word.toLowerCase())
+                !classTypes.includes(word.toLowerCase()) &&
+                !/\d/.test(word)
             );
 
           if (words.length > 0) {
@@ -186,6 +310,7 @@ export default function Home() {
       /\d+(\.\d+)?\s*(liter|litre|LITER)\b/i,
       /\d+(\.\d+)?\s*l\b/i,
       /\d+(\.\d+)?\s*(fl\.?\s*oz|fluid ounces|oz)\b/i,
+      /\d+\s*pint\s*\d*\s*fl\.?\s*oz/i,
     ];
 
     for (const pattern of patterns) {
@@ -324,9 +449,10 @@ export default function Home() {
         </p>
 
         <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
-          <strong>Best Results:</strong> Upload a clear, straight-on image showing
-          the front and/or back label. OCR accuracy may decrease when images are
-          blurry, angled, reflective, partially obscured, or low resolution.
+          <strong>Best Results:</strong> For best results, upload a clear,
+          high-resolution image of the front and/or back label. OCR accuracy may
+          be reduced by glare, reflections, curved surfaces, angled photos, or
+          partially obscured label information.
         </div>
 
         <div className="mt-8 rounded-lg border border-dashed border-slate-300 p-6">
